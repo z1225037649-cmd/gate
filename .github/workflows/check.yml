@@ -2,7 +2,6 @@ name: VPN Gate Node Check
 
 on:
   schedule:
-    # 每 24 小时运行一次（UTC 00:00，北京时间 08:00）
     - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
@@ -32,22 +31,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Validate worker secret
         env:
           DOMAIN: ${{ secrets.DOMAIN }}
@@ -57,7 +50,6 @@ jobs:
             exit 1
           fi
           echo "检测域名已配置：${DOMAIN}"
-
       - name: Run pipeline
         env:
           CHECK_WORKER: "https://${{ secrets.DOMAIN }}/check?sstp=vpn:vpn@"
@@ -66,7 +58,6 @@ jobs:
           MAX_CHECK_NODES: ${{ github.event.inputs.max_nodes || '0' }}
           MIN_SUCCESS_RATIO: '0'
         run: python vpngate.py
-
       - name: Ensure GitHub Pages is enabled
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,17 +65,13 @@ jobs:
           set -u
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/pages"
           auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
-
           status=$(curl -sS -o /tmp/pages.json -w '%{http_code}' "${auth[@]}" "${api}")
           echo "GET ${api} -> ${status}"
-
           if [ "${status}" = "200" ]; then
             echo "GitHub Pages 已启用"
             exit 0
           fi
-
           if [ "${status}" = "404" ]; then
-            # 创建站点必须用 POST，且 workflow 构建类型不接受 source 字段
             create=$(curl -sS -o /tmp/pages-create.json -w '%{http_code}' -X POST \
               "${auth[@]}" -H "Content-Type: application/json" \
               -d '{"build_type":"workflow"}' "${api}")
@@ -102,23 +89,31 @@ jobs:
                 ;;
             esac
           fi
-
           echo "::error::查询 Pages 状态失败（HTTP ${status}），请检查仓库 Pages 设置或工作流权限。"
           cat /tmp/pages.json 2>/dev/null || true
           exit 1
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
       - name: Show site URL
         run: |
           echo "订阅地址：https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/nodes.txt"
